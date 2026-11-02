@@ -1,0 +1,98 @@
+rules_version = '2';
+
+// ============================================================
+//  도덕 실천 기록장 — Firestore 보안 규칙
+//  ※ 아래 TEACHER 이메일을 js/firebase-config.js 의 TEACHER_EMAIL 과
+//    똑같이 바꾼 뒤, Firebase 콘솔 > Firestore > 규칙 에 붙여 넣고 [게시]
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function teacherEmail() { return 'pwoong99@naver.com'; }
+
+    function signedIn()  { return request.auth != null; }
+    function isTeacher() {
+      return signedIn() && request.auth.token.email == teacherEmail();
+    }
+    function sessionPath() {
+      return /databases/$(database)/documents/sessions/$(request.auth.uid);
+    }
+    // 학생 로그인 = 익명 로그인 + 번호·비밀번호가 맞는 세션 문서
+    function hasSession() { return signedIn() && exists(sessionPath()); }
+    function mySid()      { return get(sessionPath()).data.sid; }
+    function roundOpen(rid) {
+      return get(/databases/$(database)/documents/rounds/$(rid)).data.status == 'open';
+    }
+
+    // 학생 명단 (이름·번호) — 로그인 화면에서도 보여야 하므로 로그인(익명 포함)만 하면 읽기 가능
+    match /students/{sid} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+
+    // 비밀번호 — 학생은 읽을 수 없음. 본인 비밀번호 변경만 가능
+    match /pins/{sid} {
+      allow read, write: if isTeacher();
+      allow update: if hasSession() && mySid() == sid
+        && request.resource.data.keys().hasOnly(['pin', 'updatedAt'])
+        && request.resource.data.pin is string
+        && request.resource.data.pin.matches('^[0-9]{4}$');
+    }
+
+    // 로그인 세션 — 입력한 비밀번호가 pins 문서와 같을 때만 만들어짐
+    match /sessions/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || isTeacher();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['sid', 'pin', 'at'])
+        && request.resource.data.sid is string
+        && exists(/databases/$(database)/documents/pins/$(request.resource.data.sid))
+        && get(/databases/$(database)/documents/pins/$(request.resource.data.sid)).data.pin
+           == request.resource.data.pin;
+      allow delete: if (signedIn() && request.auth.uid == uid) || isTeacher();
+    }
+
+    // 실천 회차 — 교사만 만들고 고침
+    match /rounds/{rid} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+
+    // 실천 항목 + 날짜별 체크(checks 맵)
+    match /practices/{pid} {
+      allow read: if hasSession() || isTeacher();
+      allow create: if isTeacher() || (hasSession()
+        && request.resource.data.sid == mySid()
+        && roundOpen(request.resource.data.rid)
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 40
+        && request.resource.data.detail.size() <= 200);
+      allow update: if isTeacher() || (hasSession()
+        && resource.data.sid == mySid()
+        && roundOpen(resource.data.rid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['title', 'detail', 'checks', 'updatedAt'])
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 40
+        && request.resource.data.detail.size() <= 200);
+      allow delete: if isTeacher() || (hasSession()
+        && resource.data.sid == mySid()
+        && roundOpen(resource.data.rid));
+    }
+
+    // 응원 — 친구 실천 항목에 스티커·한마디
+    match /cheers/{cid} {
+      allow read: if hasSession() || isTeacher();
+      allow create: if hasSession()
+        && request.resource.data.fromSid == mySid()
+        && request.resource.data.toSid != mySid()
+        && request.resource.data.keys().hasOnly(['pid', 'rid', 'toSid', 'fromSid', 'emoji', 'text', 'createdAt'])
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 60
+        && request.resource.data.emoji is string
+        && request.resource.data.emoji.size() <= 8;
+      allow delete: if isTeacher() || (hasSession() && resource.data.fromSid == mySid());
+    }
+  }
+}
