@@ -21,8 +21,13 @@ service cloud.firestore {
     // 학생 로그인 = 익명 로그인 + 번호·비밀번호가 맞는 세션 문서
     function hasSession() { return signedIn() && exists(sessionPath()); }
     function mySid()      { return get(sessionPath()).data.sid; }
-    function roundOpen(rid) {
-      return get(/databases/$(database)/documents/rounds/$(rid)).data.status == 'open';
+    function roundOf(rid)   { return get(/databases/$(database)/documents/rounds/$(rid)).data; }
+    function roundOpen(rid) { return roundOf(rid).status == 'open'; }
+    // 교사가 '학생 수정 불가'로 정하면 false
+    function canEdit(rid)   { return roundOf(rid).get('allowEdit', true) == true; }
+    function okText(d) {
+      return d.title is string && d.title.size() > 0 && d.title.size() <= 40
+        && d.detail is string && d.detail.size() <= 200;
     }
 
     // 학생 명단 (이름·번호) — 로그인 화면에서도 보여야 하므로 로그인(익명 포함)만 하면 읽기 가능
@@ -64,21 +69,21 @@ service cloud.firestore {
       allow create: if isTeacher() || (hasSession()
         && request.resource.data.sid == mySid()
         && roundOpen(request.resource.data.rid)
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 40
-        && request.resource.data.detail.size() <= 200);
+        && okText(request.resource.data)
+        && (canEdit(request.resource.data.rid)
+            || request.resource.data.title in roundOf(request.resource.data.rid).get('presets', [])));
       allow update: if isTeacher() || (hasSession()
         && resource.data.sid == mySid()
         && roundOpen(resource.data.rid)
-        && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['title', 'detail', 'checks', 'updatedAt'])
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 40
-        && request.resource.data.detail.size() <= 200);
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checks', 'updatedAt'])
+            || (canEdit(resource.data.rid)
+                && request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['title', 'detail', 'checks', 'updatedAt', 'order'])
+                && okText(request.resource.data))));
       allow delete: if isTeacher() || (hasSession()
         && resource.data.sid == mySid()
-        && roundOpen(resource.data.rid));
+        && roundOpen(resource.data.rid)
+        && canEdit(resource.data.rid));
     }
 
     // 응원 — 친구 실천 항목에 스티커·한마디

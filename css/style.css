@@ -88,7 +88,12 @@ main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
 .err { color: var(--terra); font-size: 13px; min-height: 18px; margin: 4px 0 8px; text-align: center; }
 
 /* ---------- 탭 ---------- */
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.tabs {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  position: sticky; top: var(--topbar-h, 64px); z-index: 15;
+  background: var(--paper); margin: 0 -16px 14px; padding: 10px 16px;
+  box-shadow: 0 6px 8px -8px rgba(51, 65, 92, .25);
+}
 .tab {
   border: 1px solid var(--line); background: var(--card); color: var(--navy-soft);
   border-radius: 999px; padding: 8px 16px; cursor: pointer; font-weight: 500;
@@ -225,6 +230,19 @@ main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
 .emoji-btn.sel { border-color: var(--terra); background: var(--terra-soft); }
 .cheer-input-row { display: flex; gap: 6px; }
 .cheer-input-row input { flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+
+/* 실천 다짐 여러 칸 입력 */
+.slot-list { display: grid; gap: 10px; max-height: 60vh; overflow-y: auto; padding-right: 2px; }
+.slot { display: flex; gap: 10px; align-items: flex-start; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.slot-no {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--sage-soft); color: #3F6148;
+  font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; margin-top: 6px;
+}
+.slot-body { flex: 1; display: grid; gap: 6px; }
+.slot-body input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
+.slot-body input.slot-detail { font-size: 13px; padding: 7px 11px; }
+.slot-body input:focus { outline: 2px solid var(--sage); border-color: transparent; }
+.slot-body .hint { font-size: 12px; color: var(--terra); }
 
 /* ---------- 교사 표 ---------- */
 .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }

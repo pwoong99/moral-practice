@@ -18,4 +18,7 @@ export const firebaseConfig = {
 export const TEACHER_EMAIL = "pwoong99@naver.com";
 
 // 화면에 표시할 학급 이름
-export const CLASS_NAME = "5학년 4반";
+export const CLASS_NAME = "신대초 6학년 3반";
+
+// 학생 비밀번호 규칙: 이 숫자 + 번호 두 자리  (6학년 3반 → "63" → 1번 6301, 15번 6315)
+export const PIN_PREFIX = "63";

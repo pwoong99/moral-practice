@@ -12,9 +12,9 @@ import {
   onSnapshot, query, where, writeBatch, serverTimestamp, deleteField, getDocs,
   connectFirestoreEmulator
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig, TEACHER_EMAIL, CLASS_NAME } from "./firebase-config.js";
+import { firebaseConfig, TEACHER_EMAIL, CLASS_NAME, PIN_PREFIX } from "./firebase-config.js";
 
-const VERSION = "v1.01";
+const VERSION = "v1.1";
 
 // ---------- Firebase ----------
 const app = initializeApp(firebaseConfig);
@@ -34,6 +34,7 @@ const S = {
   sid: null,           // 로그인한 학생 번호(문서 id, 예: "07")
   students: [],
   rounds: [],
+  autoDone: {},
   practices: [],
   cheers: [],
   pins: {},
@@ -61,7 +62,8 @@ const parse = (s) => { const [y, m, d] = s.split("-").map(Number); return new Da
 const today = () => fmt(new Date());
 const md = (s) => { const d = parse(s); return `${d.getMonth() + 1}/${d.getDate()}`; };
 const mdw = (s) => { const d = parse(s); return `${d.getMonth() + 1}/${d.getDate()}(${WEEK[d.getDay()]})`; };
-const randPin = () => String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+// 비밀번호 규칙: 학년반(PIN_PREFIX) + 번호 두 자리  예) 6학년 3반 1번 → 6301
+const pinFor = (num) => `${PIN_PREFIX || ""}${pad2(Number(num))}`.slice(-4).padStart(4, "0");
 const sidOf = (num) => pad2(Number(num));
 
 function toast(msg, ms = 2200) {
@@ -161,8 +163,9 @@ function selectRound(rid, silent) {
   if (rid && S.role !== "login") {
     S.roundUnsubs.push(onSnapshot(query(collection(db, "practices"), where("rid", "==", rid)), (snap) => {
       S.practices = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+        .sort((a, b) => ((a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)) || ((a.order || 0) - (b.order || 0)));
       render();
+      if (S.role === "student" && !snap.metadata.fromCache) autoCreatePresets();
     }, snapErr));
     S.roundUnsubs.push(onSnapshot(query(collection(db, "cheers"), where("rid", "==", rid)), (snap) => {
       S.cheers = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
@@ -448,12 +451,16 @@ function mineHtml() {
   const mine = S.practices.filter((p) => p.sid === S.sid);
   const max = r.maxItems || 3;
   const open = isOpen(r);
-  const addBtn = open && mine.length < max
-    ? `<button class="btn btn-primary btn-sm" data-act="new-practice">＋ 실천 다짐 추가 (${mine.length}/${max})</button>`
-    : open ? `<span class="muted">최대 ${max}개까지 등록했어요</span>` : "";
+  const canWrite = open && r.allowEdit !== false;
+  const addBtn = canWrite
+    ? `<button class="btn btn-primary btn-sm" data-act="open-practice-form">✏️ 실천 다짐 ${mine.length ? "고치기" : "쓰기"} (${mine.length}/${max})</button>`
+    : open ? `<span class="muted">선생님이 정해 준 실천이에요</span>` : "";
+  const hasPreset = (r.presets || []).length > 0;
   const list = mine.length
-    ? `<div class="practice-list">${mine.map((p) => practiceCardHtml(p, r, { editable: open, manage: open })).join("")}</div>`
-    : `<div class="empty">${open ? "이번 회차에 실천할 다짐을 등록해 보세요!<br>예) 하루에 한 번 친구에게 고맙다고 말하기" : "이 회차에 등록한 실천이 없어요."}</div>`;
+    ? `<div class="practice-list">${mine.map((p) => practiceCardHtml(p, r, { editable: open })).join("")}</div>`
+    : `<div class="empty">${canWrite
+        ? `[실천 다짐 쓰기]를 눌러 이번 회차에 실천할 일을 적어 보세요!<br>${hasPreset ? "선생님이 적어 둔 실천을 그대로 쓰거나 바꿀 수 있어요." : "예) 하루에 한 번 친구에게 고맙다고 말하기"}`
+        : open ? "실천 항목을 준비하고 있어요…" : "이 회차에 등록한 실천이 없어요."}</div>`;
   return `<div class="section-title"><span>나의 실천 다짐</span>${addBtn}</div>${list}
     ${!open ? `<p class="muted" style="margin-top:12px">종료된 회차는 기록을 볼 수만 있어요.</p>` : ""}`;
 }
@@ -538,7 +545,7 @@ function statusHtml() {
 function roundsAdminHtml() {
   const items = S.rounds.map((r) => `<div class="round-item">
     <div><div class="ri-title">${esc(r.title)} ${roundBadge(r)}</div>
-      <div class="ri-sub">${mdw(r.start)} ~ ${mdw(r.end)} · ${roundDays(r).length}일${r.weekends === false ? " (주말 제외)" : ""} · 1인 최대 ${r.maxItems || 3}개</div></div>
+      <div class="ri-sub">${mdw(r.start)} ~ ${mdw(r.end)} · ${roundDays(r).length}일${r.weekends === false ? " (주말 제외)" : ""} · 1인 최대 ${r.maxItems || 3}개${(r.presets || []).length ? ` · 교사 지정 ${r.presets.length}개` : ""}${r.allowEdit === false ? " · 학생 수정 불가" : ""}</div></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-sm" data-act="edit-round" data-rid="${r.id}">수정</button>
       <button class="btn btn-sm" data-act="toggle-round" data-rid="${r.id}">${r.status === "open" ? "종료하기" : "다시 열기"}</button>
@@ -561,13 +568,14 @@ function studentsAdminHtml() {
     <div class="practice-card" style="margin-bottom:18px">
       <div class="field"><label>한 줄에 한 명씩 "번호 이름" 으로 입력 (엑셀에서 두 칸 복사해 붙여 넣어도 돼요)</label>
         <textarea id="bulkText" rows="5" placeholder="1 김하늘&#10;2 이바다&#10;3 박나무"></textarea>
-        <div class="hint">새 학생은 비밀번호 4자리가 무작위로 만들어져요. 이미 있는 번호는 이름만 바뀝니다.</div></div>
+        <div class="hint">새 학생의 비밀번호는 <b>${esc(PIN_PREFIX)} + 번호 두 자리</b>로 만들어져요 (예: 1번 → ${pinFor(1)}, 15번 → ${pinFor(15)}). 이미 있는 번호는 이름만 바뀝니다.</div></div>
       <button class="btn btn-primary" data-act="bulk-add">명단 등록</button>
     </div>
     <div class="section-title"><span>학생 목록 (${S.students.length}명)</span>
       <span style="display:flex;gap:6px">
         <button class="btn btn-sm" data-act="toggle-pins">${S.showPins ? "🙈 비밀번호 숨기기" : "👁 비밀번호 보기"}</button>
-        <button class="btn btn-sm" data-act="print-pins">🖨 비밀번호 쪽지 인쇄</button></span></div>
+        <button class="btn btn-sm" data-act="print-pins">🖨 비밀번호 쪽지 인쇄</button>
+        <button class="btn btn-sm btn-danger" data-act="reset-all-pins">🔄 전체 비밀번호 초기화</button></span></div>
     <div class="table-wrap"><table class="tbl"><thead><tr><th>번호</th><th>이름</th><th>비밀번호</th><th>관리</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="4" class="muted">아직 학생이 없어요.</td></tr>`}</tbody></table></div>`;
 }
@@ -600,22 +608,40 @@ function studentModalHtml(m) {
   const teacher = S.role === "teacher";
   const me = s.id === S.sid;
   const body = ps.length ? ps.map((p) => practiceCardHtml(p, r, {
-    editable: teacher || (me && isOpen(r)), manage: teacher || (me && isOpen(r)),
+    editable: teacher || (me && isOpen(r)), manage: teacher,
     cheer: !teacher && !me && isOpen(r),
   })).join("") : `<div class="empty">아직 등록한 실천이 없어요.</div>`;
   return `<div class="modal">${modalHead(`${s.num}번 ${esc(s.name)}의 실천`)}
     <div class="practice-list">${body}</div>
-    ${teacher ? `<div class="modal-foot"><button class="btn btn-sm" data-act="new-practice" data-sid="${s.id}">＋ 대신 등록하기</button></div>` : ""}
+    ${teacher ? `<div class="modal-foot"><button class="btn btn-sm" data-act="open-practice-form" data-sid="${s.id}">✏️ 실천 다짐 고치기 / 대신 등록</button></div>` : ""}
   </div>`;
 }
 
+function openPracticeForm(sid) {
+  const r = currentRound();
+  if (!r) return;
+  const mine = S.practices.filter((p) => p.sid === sid);
+  const max = Math.max(r.maxItems || 3, mine.length);
+  const slots = mine.map((p) => ({ pid: p.id, title: p.title, detail: p.detail || "", days: Object.keys(p.checks || {}).length }));
+  if (!mine.length) (r.presets || []).forEach((t) => slots.push({ title: t, detail: "" }));
+  while (slots.length < max) slots.push({ title: "", detail: "" });
+  openModal({ type: "practice", sid, slots, back: S.modal?.type === "student" ? S.modal : null, focus: "pf-t-0" });
+}
+
 function practiceFormHtml(m) {
-  const p = m.pid ? S.practices.find((x) => x.id === m.pid) : null;
-  return `<div class="modal narrow">${modalHead(p ? "실천 다짐 고치기" : "실천 다짐 등록")}
-    <div class="field"><label>무엇을 실천할까요? (40자까지)</label>
-      <input id="pfTitle" maxlength="40" value="${esc(p?.title || "")}" placeholder="예) 친구에게 하루 한 번 칭찬하기"></div>
-    <div class="field"><label>어떻게, 왜 실천할까요? (선택, 200자까지)</label>
-      <textarea id="pfDetail" maxlength="200" placeholder="예) 쉬는 시간마다 친구의 좋은 점을 찾아서 말해 줄 거예요.">${esc(p?.detail || "")}</textarea></div>
+  const r = currentRound();
+  const s = S.students.find((x) => x.id === m.sid);
+  const teacher = S.role === "teacher";
+  const rows = m.slots.map((sl, i) => `<div class="slot">
+      <span class="slot-no">${i + 1}</span>
+      <div class="slot-body">
+        <input id="pf-t-${i}" maxlength="40" value="${esc(sl.title)}" placeholder="${i === 0 ? "예) 친구에게 하루 한 번 칭찬하기" : "실천할 일 (비워 두면 등록 안 함)"}">
+        <input id="pf-d-${i}" class="slot-detail" maxlength="200" value="${esc(sl.detail)}" placeholder="(선택) 어떻게, 왜 실천할까요?">
+        ${sl.days ? `<div class="hint">이미 ${sl.days}일 기록했어요. 칸을 비우면 기록도 함께 지워져요.</div>` : ""}
+      </div></div>`).join("");
+  return `<div class="modal narrow">${modalHead(`${teacher && s ? `${s.num}번 ${esc(s.name)} — ` : ""}실천 다짐 쓰기`)}
+    <p class="muted" style="margin:-6px 0 12px">최대 ${m.slots.length}개까지 한 번에 적고 [저장]을 누르세요. 필요 없는 칸은 비워 두면 돼요.</p>
+    <div class="slot-list">${rows}</div>
     <div class="err" id="pfErr"></div>
     <div class="modal-foot"><button class="btn" data-act="close-modal">취소</button>
       <button class="btn btn-primary" data-act="save-practice">저장</button></div></div>`;
@@ -635,9 +661,14 @@ function roundFormHtml(m) {
     </div>
     <div class="row2">
       <div class="field"><label>1인당 최대 실천 개수</label><select id="rfMax">
-        ${[1, 2, 3, 4, 5].map((n) => `<option ${(r?.maxItems || 3) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option ${(r?.maxItems || 3) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="field"><label>&nbsp;</label><label class="check-line"><input id="rfWeekend" type="checkbox" ${r?.weekends === false ? "" : "checked"}> 주말도 기록하기</label></div>
     </div>
+    <div class="field"><label>교사가 정해 주는 실천 (선택 · 한 줄에 하나씩)</label>
+      <textarea id="rfPresets" rows="3" placeholder="예) 친구에게 먼저 인사하기&#10;급식 남기지 않기">${esc((r?.presets || []).join("\n"))}</textarea>
+      <div class="hint">비워 두면 학생이 처음부터 직접 적어요. 적어 두면 학생 입력 칸에 미리 채워져요.</div></div>
+    <label class="check-line" style="margin-bottom:6px"><input id="rfAllowEdit" type="checkbox" ${r?.allowEdit === false ? "" : "checked"}> 학생이 실천 내용을 바꾸거나 더 추가할 수 있어요</label>
+    <div class="hint" style="margin-bottom:8px">체크를 끄면 위에 적은 실천이 모든 학생에게 그대로 등록되고, 학생은 O/△/X 기록만 해요.</div>
     <div class="err" id="rfErr"></div>
     <div class="modal-foot"><button class="btn" data-act="close-modal">취소</button>
       <button class="btn btn-primary" data-act="save-round">저장</button></div></div>`;
@@ -688,28 +719,53 @@ async function cycleMark(pid, date) {
 
 async function savePractice() {
   const m = S.modal;
-  const title = $("#pfTitle").value.trim();
-  const detail = $("#pfDetail").value.trim();
+  const r = currentRound();
   const err = $("#pfErr");
-  if (!title) { err.textContent = "실천할 내용을 적어 주세요."; return; }
+  const rows = m.slots.map((sl, i) => ({
+    ...sl, i,
+    nt: (document.getElementById(`pf-t-${i}`)?.value || "").trim(),
+    nd: (document.getElementById(`pf-d-${i}`)?.value || "").trim(),
+  }));
+  const dels = rows.filter((x) => x.pid && !x.nt);
+  const recorded = dels.filter((x) => x.days);
+  if (recorded.length && !confirm(`비운 칸 중 ${recorded.length}개는 이미 기록이 있어요.\n지우면 기록과 받은 응원도 사라져요. 계속할까요?`)) return;
+  err.textContent = "저장 중…";
   try {
-    if (m.pid) {
-      await updateDoc(doc(db, "practices", m.pid), { title, detail, updatedAt: serverTimestamp() });
-      toast("고쳤어요.");
-    } else {
-      const sid = m.sid || S.sid;
-      const r = currentRound();
-      const cnt = S.practices.filter((p) => p.sid === sid).length;
-      if (S.role !== "teacher" && cnt >= (r.maxItems || 3)) { err.textContent = "더 등록할 수 없어요."; return; }
-      await addDoc(collection(db, "practices"), {
-        rid: S.rid, sid, title, detail, checks: {},
-        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-      });
-      toast("실천 다짐을 등록했어요! 🌱");
-    }
+    const b = writeBatch(db);
+    let n = 0;
+    rows.forEach((x) => {
+      if (x.pid && !x.nt) { b.delete(doc(db, "practices", x.pid)); n++; }
+      else if (x.pid && (x.nt !== x.title || x.nd !== x.detail)) {
+        b.update(doc(db, "practices", x.pid), { title: x.nt, detail: x.nd, updatedAt: serverTimestamp() }); n++;
+      } else if (!x.pid && x.nt) {
+        b.set(doc(collection(db, "practices")), {
+          rid: r.id, sid: m.sid, title: x.nt, detail: x.nd, checks: {}, order: x.i,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        }); n++;
+      }
+    });
+    if (S.role === "teacher") dels.forEach((x) => S.cheers.filter((c) => c.pid === x.pid).forEach((c) => b.delete(doc(db, "cheers", c.id))));
+    if (n) await b.commit();
+    toast(n ? "실천 다짐을 저장했어요! 🌱" : "바뀐 내용이 없어요.");
     S.modal = m.back || null;
     renderModal();
   } catch (e) { err.textContent = errMsg(e); }
+}
+
+// 교사가 '학생 수정 불가'로 정한 회차: 교사 지정 실천을 학생 기록장에 자동 등록
+async function autoCreatePresets() {
+  const r = currentRound();
+  if (!r || !isOpen(r) || r.allowEdit !== false || !(r.presets || []).length) return;
+  if (S.practices.some((p) => p.sid === S.sid) || S.autoDone[r.id]) return;
+  S.autoDone[r.id] = true;
+  try {
+    const b = writeBatch(db);
+    r.presets.forEach((t, i) => b.set(doc(db, "practices", `${r.id}_${S.sid}_${i}`), {
+      rid: r.id, sid: S.sid, title: t, detail: "", checks: {}, order: i,
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await b.commit();
+  } catch (e) { console.warn(e); S.autoDone[r.id] = false; }
 }
 
 async function delPractice(pid) {
@@ -772,10 +828,15 @@ async function saveRound() {
   const start = $("#rfStart").value, end = $("#rfEnd").value;
   const maxItems = Number($("#rfMax").value);
   const weekends = $("#rfWeekend").checked;
+  const presets = $("#rfPresets").value.split("\n").map((x) => x.trim()).filter(Boolean);
+  const allowEdit = $("#rfAllowEdit").checked;
   const err = $("#rfErr");
   if (!title) { err.textContent = "회차 이름을 적어 주세요."; return; }
   if (!start || !end || start > end) { err.textContent = "기간을 확인해 주세요."; return; }
-  const data = { title, desc, start, end, maxItems, weekends };
+  if (presets.some((x) => x.length > 40)) { err.textContent = "교사 지정 실천은 한 줄에 40자까지예요."; return; }
+  if (presets.length > maxItems) { err.textContent = `교사 지정 실천(${presets.length}개)이 최대 개수(${maxItems}개)보다 많아요.`; return; }
+  if (!allowEdit && !presets.length) { err.textContent = "학생 수정을 막으려면 교사 지정 실천을 1개 이상 적어 주세요."; return; }
+  const data = { title, desc, start, end, maxItems, weekends, presets, allowEdit };
   try {
     if (m.rid) await updateDoc(doc(db, "rounds", m.rid), data);
     else {
@@ -831,7 +892,7 @@ async function bulkAdd() {
       const sid = sidOf(num);
       const exists = S.students.find((s) => s.id === sid);
       b.set(doc(db, "students", sid), { num, name, active: true }, { merge: true });
-      if (!exists || !S.pins[sid]) { b.set(doc(db, "pins", sid), { pin: randPin(), updatedAt: serverTimestamp() }); added++; }
+      if (!exists || !S.pins[sid]) { b.set(doc(db, "pins", sid), { pin: pinFor(num), updatedAt: serverTimestamp() }); added++; }
       else renamed++;
     });
     await b.commit();
@@ -849,11 +910,23 @@ async function saveName(sid) {
 
 async function resetPin(sid) {
   const s = S.students.find((x) => x.id === sid);
-  if (!confirm(`${s.num}번 ${s.name} 학생의 비밀번호를 새로 만들까요?`)) return;
-  const pin = randPin();
+  const pin = pinFor(s.num);
+  if (!confirm(`${s.num}번 ${s.name} 학생의 비밀번호를 ${pin}(으)로 초기화할까요?`)) return;
   try {
     await setDoc(doc(db, "pins", sid), { pin, updatedAt: serverTimestamp() });
     alert(`${s.num}번 ${s.name}\n새 비밀번호: ${pin}`);
+  } catch (e) { toast(errMsg(e)); }
+}
+
+async function resetAllPins() {
+  if (!S.students.length) return;
+  const ex = S.students[0];
+  if (!confirm(`우리 반 학생 ${S.students.length}명의 비밀번호를 모두 초기화할까요?\n규칙: ${PIN_PREFIX} + 번호 두 자리 (예: ${ex.num}번 → ${pinFor(ex.num)})\n학생이 바꾼 비밀번호도 모두 이 규칙으로 돌아가요.`)) return;
+  try {
+    const b = writeBatch(db);
+    S.students.forEach((s) => b.set(doc(db, "pins", s.id), { pin: pinFor(s.num), updatedAt: serverTimestamp() }));
+    await b.commit();
+    toast(`${S.students.length}명의 비밀번호를 초기화했어요.`, 3000);
   } catch (e) { toast(errMsg(e)); }
 }
 
@@ -920,10 +993,8 @@ document.addEventListener("click", (e) => {
     case "tab": S.tab = d.tab; render(); break;
     case "mark": setMark(d.pid, today(), d.mark); break;
     case "cycle": cycleMark(d.pid, d.date); break;
-    case "new-practice":
-      openModal({ type: "practice", sid: d.sid || S.sid, back: S.modal?.type === "student" ? S.modal : null, focus: "pfTitle" }); break;
-    case "edit-practice":
-      openModal({ type: "practice", pid: d.pid, back: S.modal?.type === "student" ? S.modal : null, focus: "pfTitle" }); break;
+    case "open-practice-form": openPracticeForm(d.sid || S.sid); break;
+    case "edit-practice": openPracticeForm(S.practices.find((p) => p.id === d.pid)?.sid); break;
     case "save-practice": savePractice(); break;
     case "del-practice": delPractice(d.pid); break;
     case "open-student": openModal({ type: "student", sid: d.sid, emoji: {} }); break;
@@ -941,6 +1012,7 @@ document.addEventListener("click", (e) => {
     case "bulk-add": bulkAdd(); break;
     case "save-name": saveName(d.sid); break;
     case "reset-pin": resetPin(d.sid); break;
+    case "reset-all-pins": resetAllPins(); break;
     case "del-student": delStudent(d.sid); break;
     case "toggle-pins": S.showPins = !S.showPins; render(); break;
     case "print-pins": printPins(); break;
@@ -963,3 +1035,9 @@ document.addEventListener("keydown", (e) => {
   else if (act === "save-pin") savePin();
   else if (act === "send-cheer") sendCheer(e.target.dataset.pid);
 });
+
+// 상단 바 높이에 맞춰 메뉴 탭을 고정
+const topbarEl = document.querySelector(".topbar");
+if (topbarEl && "ResizeObserver" in window) {
+  new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", topbarEl.offsetHeight + "px")).observe(topbarEl);
+}
