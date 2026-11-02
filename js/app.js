@@ -14,7 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, TEACHER_EMAIL, CLASS_NAME } from "./firebase-config.js";
 
-const VERSION = "v1.0";
+const VERSION = "v1.01";
 
 // ---------- Firebase ----------
 const app = initializeApp(firebaseConfig);
@@ -249,12 +249,25 @@ async function studentLogin() {
 }
 
 async function teacherLogin() {
-  const email = $("#tEmail").value.trim();
+  const email = $("#tEmail").value.trim().toLowerCase();
   const pw = $("#tPw").value;
   const err = $("#loginErr");
   err.textContent = "확인 중…";
   try { await signInWithEmailAndPassword(auth, email, pw); }
-  catch (e) { err.textContent = "이메일 또는 비밀번호가 맞지 않아요."; }
+  catch (e) {
+    const c = e?.code || "";
+    const msg = {
+      "auth/operation-not-allowed": "Firebase에서 '이메일/비밀번호' 로그인이 꺼져 있어요. (Authentication > 로그인 방법에서 사용 설정)",
+      "auth/invalid-credential": "이메일 또는 비밀번호가 맞지 않아요. (Authentication > Users에 이 계정이 있는지도 확인)",
+      "auth/wrong-password": "비밀번호가 맞지 않아요.",
+      "auth/user-not-found": "이 이메일로 만든 계정이 없어요. (Authentication > Users에서 사용자 추가)",
+      "auth/invalid-email": "이메일 형식이 맞지 않아요.",
+      "auth/too-many-requests": "여러 번 틀려서 잠시 막혔어요. 몇 분 뒤 다시 해 주세요.",
+      "auth/network-request-failed": "인터넷 연결을 확인해 주세요.",
+      "auth/api-key-not-valid.-please-pass-a-valid-api-key.": "firebase-config.js의 apiKey가 맞지 않아요.",
+    }[c];
+    err.textContent = (msg || "로그인하지 못했어요.") + ` [${c || e?.message || e}]`;
+  }
 }
 
 async function logout() {
