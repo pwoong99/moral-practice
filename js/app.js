@@ -14,7 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, TEACHER_EMAIL, CLASS_NAME, PIN_PREFIX } from "./firebase-config.js";
 
-const VERSION = "v1.1";
+const VERSION = "v1.11";
 
 // ---------- Firebase ----------
 const app = initializeApp(firebaseConfig);
@@ -564,20 +564,14 @@ function studentsAdminHtml() {
     <td class="pin-cell">${S.showPins ? esc(S.pins[s.id] ?? "없음") : "••••"}</td>
     <td><button class="btn btn-sm" data-act="reset-pin" data-sid="${s.id}">비밀번호 초기화</button>
       <button class="btn btn-sm btn-danger" data-act="del-student" data-sid="${s.id}">삭제</button></td></tr>`).join("");
-  return `<div class="section-title"><span>학생 명단 등록</span></div>
-    <div class="practice-card" style="margin-bottom:18px">
-      <div class="field"><label>한 줄에 한 명씩 "번호 이름" 으로 입력 (엑셀에서 두 칸 복사해 붙여 넣어도 돼요)</label>
-        <textarea id="bulkText" rows="5" placeholder="1 김하늘&#10;2 이바다&#10;3 박나무"></textarea>
-        <div class="hint">새 학생의 비밀번호는 <b>${esc(PIN_PREFIX)} + 번호 두 자리</b>로 만들어져요 (예: 1번 → ${pinFor(1)}, 15번 → ${pinFor(15)}). 이미 있는 번호는 이름만 바뀝니다.</div></div>
-      <button class="btn btn-primary" data-act="bulk-add">명단 등록</button>
-    </div>
-    <div class="section-title"><span>학생 목록 (${S.students.length}명)</span>
-      <span style="display:flex;gap:6px">
+  return `<div class="section-title"><span>학생 목록 (${S.students.length}명)</span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn btn-sm btn-primary" data-act="open-bulk">＋ 학생 명단 등록</button>
         <button class="btn btn-sm" data-act="toggle-pins">${S.showPins ? "🙈 비밀번호 숨기기" : "👁 비밀번호 보기"}</button>
         <button class="btn btn-sm" data-act="print-pins">🖨 비밀번호 쪽지 인쇄</button>
         <button class="btn btn-sm btn-danger" data-act="reset-all-pins">🔄 전체 비밀번호 초기화</button></span></div>
     <div class="table-wrap"><table class="tbl"><thead><tr><th>번호</th><th>이름</th><th>비밀번호</th><th>관리</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="4" class="muted">아직 학생이 없어요.</td></tr>`}</tbody></table></div>`;
+      <tbody>${rows || `<tr><td colspan="4" class="muted">아직 학생이 없어요. [＋ 학생 명단 등록]을 눌러 명단을 넣어 주세요.</td></tr>`}</tbody></table></div>`;
 }
 
 // ---------- 모달 ----------
@@ -591,6 +585,7 @@ function renderModal() {
     else if (m.type === "practice") inner = practiceFormHtml(m);
     else if (m.type === "round") inner = roundFormHtml(m);
     else if (m.type === "pin") inner = pinFormHtml();
+    else if (m.type === "bulk") inner = bulkFormHtml();
     root.innerHTML = `<div class="modal-back" data-act="modal-back">${inner}</div>`;
   });
   if (m.focus) { const el = document.getElementById(m.focus); if (el) el.focus(); m.focus = null; }
@@ -672,6 +667,15 @@ function roundFormHtml(m) {
     <div class="err" id="rfErr"></div>
     <div class="modal-foot"><button class="btn" data-act="close-modal">취소</button>
       <button class="btn btn-primary" data-act="save-round">저장</button></div></div>`;
+}
+
+function bulkFormHtml() {
+  return `<div class="modal narrow">${modalHead("학생 명단 등록")}
+    <div class="field"><label>한 줄에 한 명씩 "번호 이름" 으로 입력 (엑셀에서 두 칸 복사해 붙여 넣어도 돼요)</label>
+      <textarea id="bulkText" rows="8" placeholder="1 김하늘&#10;2 이바다&#10;3 박나무"></textarea>
+      <div class="hint">새 학생의 비밀번호는 <b>${esc(PIN_PREFIX)} + 번호 두 자리</b>로 만들어져요 (예: 1번 → ${pinFor(1)}, 15번 → ${pinFor(15)}). 이미 있는 번호는 이름만 바뀝니다.</div></div>
+    <div class="modal-foot"><button class="btn" data-act="close-modal">취소</button>
+      <button class="btn btn-primary" data-act="bulk-add">명단 등록</button></div></div>`;
 }
 
 function pinFormHtml() {
@@ -896,7 +900,7 @@ async function bulkAdd() {
       else renamed++;
     });
     await b.commit();
-    $("#bulkText").value = "";
+    closeModal();
     toast(`새 학생 ${added}명, 이름 수정 ${renamed}명${bad.length ? ` · 인식 못 한 줄 ${bad.length}개` : ""}`, 3500);
   } catch (e) { toast(errMsg(e)); }
 }
@@ -1010,6 +1014,7 @@ document.addEventListener("click", (e) => {
     case "toggle-round": toggleRound(d.rid); break;
     case "del-round": delRound(d.rid); break;
     case "bulk-add": bulkAdd(); break;
+    case "open-bulk": openModal({ type: "bulk", focus: "bulkText" }); break;
     case "save-name": saveName(d.sid); break;
     case "reset-pin": resetPin(d.sid); break;
     case "reset-all-pins": resetAllPins(); break;
