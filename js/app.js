@@ -14,7 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, TEACHER_EMAIL, CLASS_NAME, PIN_PREFIX } from "./firebase-config.js";
 
-const VERSION = "v1.11";
+const VERSION = "v1.12";
 
 // ---------- Firebase ----------
 const app = initializeApp(firebaseConfig);
@@ -688,7 +688,23 @@ function pinFormHtml() {
       <button class="btn btn-primary" data-act="save-pin">바꾸기</button></div></div>`;
 }
 
+const FORM_MODALS = ["practice", "round", "pin", "bulk"];
+
 function openModal(m) { S.modal = m; renderModal(); }
+
+// 실천 다짐 창에 쓰던 내용이 있으면 닫기 전에 한 번 더 물어봄
+function practiceDirty() {
+  const m = S.modal;
+  if (m?.type !== "practice") return false;
+  return m.slots.some((sl, i) =>
+    (document.getElementById(`pf-t-${i}`)?.value ?? sl.title) !== sl.title ||
+    (document.getElementById(`pf-d-${i}`)?.value ?? sl.detail) !== sl.detail);
+}
+function requestClose() {
+  if (practiceDirty() && !confirm("쓰던 실천 다짐이 저장되지 않았어요.\n저장하지 않고 닫을까요?")) return;
+  S.modal = S.modal?.back || null;
+  renderModal();
+}
 function closeModal() { S.modal = null; renderModal(); }
 
 // ============================================================
@@ -988,7 +1004,11 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
   const a = el.dataset.act, d = el.dataset;
-  if (a === "modal-back") { if (e.target === el) closeModal(); return; }
+  if (a === "modal-back") {
+    // 글을 쓰는 창(실천 다짐·회차·비밀번호·명단)은 바깥을 눌러도 닫히지 않음
+    if (e.target === el && !FORM_MODALS.includes(S.modal?.type)) closeModal();
+    return;
+  }
   switch (a) {
     case "login-mode": S.loginMode = d.mode; render(); break;
     case "student-login": studentLogin(); break;
@@ -1005,7 +1025,7 @@ document.addEventListener("click", (e) => {
     case "pick-emoji": S.modal.emoji[d.pid] = d.emoji; renderModal(); break;
     case "send-cheer": sendCheer(d.pid); break;
     case "del-cheer": delCheer(d.cid); break;
-    case "close-modal": S.modal = S.modal?.back || null; renderModal(); break;
+    case "close-modal": requestClose(); break;
     case "open-pin": openModal({ type: "pin", focus: "pinOld" }); break;
     case "save-pin": savePin(); break;
     case "new-round": openModal({ type: "round", focus: "rfTitle" }); break;
@@ -1030,7 +1050,7 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && S.modal) { closeModal(); return; }
+  if (e.key === "Escape" && S.modal) { requestClose(); return; }
   if (e.key !== "Enter" || e.isComposing) return;
   const act = e.target.dataset?.enter;
   if (!act) return;
