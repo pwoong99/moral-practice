@@ -14,7 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, TEACHER_EMAIL, CLASS_NAME, PIN_PREFIX } from "./firebase-config.js";
 
-const VERSION = "v1.12";
+const VERSION = "v1.13";
 
 // ---------- Firebase ----------
 const app = initializeApp(firebaseConfig);
@@ -59,7 +59,11 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 const pad2 = (n) => String(n).padStart(2, "0");
 const fmt = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const parse = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
-const today = () => fmt(new Date());
+// 오늘 날짜는 기기 시간대와 상관없이 한국 시간(KST) 기준 — 보안 규칙과 같은 기준
+const today = () => {
+  const d = new Date(Date.now() + 9 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+};
 const md = (s) => { const d = parse(s); return `${d.getMonth() + 1}/${d.getDate()}`; };
 const mdw = (s) => { const d = parse(s); return `${d.getMonth() + 1}/${d.getDate()}(${WEEK[d.getDay()]})`; };
 // 비밀번호 규칙: 학년반(PIN_PREFIX) + 번호 두 자리  예) 6학년 3반 1번 → 6301
@@ -375,11 +379,13 @@ function dayGridHtml(p, r, editable) {
   return `<div class="day-grid">${roundDays(r).map((d) => {
     const m = checks[d];
     const future = d > t;
+    // 학생은 오늘 칸만, 교사는 오늘까지의 모든 칸을 고칠 수 있음
+    const canCell = editable && (S.role === "teacher" ? !future : d === t);
     const w = parse(d).getDay();
     const cls = ["day", m ? `m-${m}` : "", future ? "future" : "", d === t ? "is-today" : "",
       !m && !future ? "missed" : "", w === 0 || w === 6 ? "weekend" : "",
-      editable && !future ? "clickable" : ""].join(" ");
-    const act = editable && !future ? `data-act="cycle" data-pid="${p.id}" data-date="${d}"` : "";
+      canCell ? "clickable" : ""].join(" ");
+    const act = canCell ? `data-act="cycle" data-pid="${p.id}" data-date="${d}"` : "";
     return `<div class="${cls}" ${act} title="${mdw(d)}"><span class="d-date">${md(d)}</span><span class="d-mark">${m ? MARKS[m] : future ? "" : "·"}</span></div>`;
   }).join("")}</div>`;
 }
@@ -427,7 +433,7 @@ function practiceCardHtml(p, r, opt = {}) {
     </div>
     ${showToday ? `<div class="today-row"><span class="today-label">오늘 ${mdw(t)}</span>
       ${["O", "T", "X"].map((k) => `<button class="mark-btn ${cur === k ? "on-" + k : ""}" data-act="mark" data-pid="${p.id}" data-mark="${k}">${MARKS[k]}</button>`).join("")}
-      <span class="today-note">${cur ? "기록했어요! 다시 누르면 지워져요" : "오늘 실천했나요?"}</span></div>`
+      <span class="today-note">${cur ? "기록했어요! 다시 누르면 지워져요" : "오늘 실천했나요? (기록은 그날만 할 수 있어요)"}</span></div>`
       : `<div style="height:12px"></div>`}
     ${dayGridHtml(p, r, opt.editable)}
     ${rateHtml(st)}
@@ -1066,3 +1072,7 @@ const topbarEl = document.querySelector(".topbar");
 if (topbarEl && "ResizeObserver" in window) {
   new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", topbarEl.offsetHeight + "px")).observe(topbarEl);
 }
+
+// 화면을 켜 둔 채 날짜가 바뀌면 오늘 칸을 새로 그림
+let lastDay = today();
+setInterval(() => { if (today() !== lastDay) { lastDay = today(); render(); } }, 60 * 1000);

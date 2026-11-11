@@ -25,6 +25,17 @@ service cloud.firestore {
     function roundOpen(rid) { return roundOf(rid).status == 'open'; }
     // 교사가 '학생 수정 불가'로 정하면 false
     function canEdit(rid)   { return roundOf(rid).get('allowEdit', true) == true; }
+    // 한국 시간(KST) 기준 오늘 날짜 "YYYY-MM-DD"
+    function pad2(n) { return n < 10 ? '0' + string(n) : string(n); }
+    function kstToday() {
+      let t = request.time + duration.value(9, 'h');
+      return string(t.year()) + '-' + pad2(t.month()) + '-' + pad2(t.day());
+    }
+    // 학생은 오늘 날짜의 체크만 바꿀 수 있음
+    function onlyTodayChecks() {
+      return request.resource.data.get('checks', {})
+        .diff(resource.data.get('checks', {})).affectedKeys().hasOnly([kstToday()]);
+    }
     function okText(d) {
       return d.title is string && d.title.size() > 0 && d.title.size() <= 40
         && d.detail is string && d.detail.size() <= 200;
@@ -75,6 +86,7 @@ service cloud.firestore {
       allow update: if isTeacher() || (hasSession()
         && resource.data.sid == mySid()
         && roundOpen(resource.data.rid)
+        && onlyTodayChecks()
         && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checks', 'updatedAt'])
             || (canEdit(resource.data.rid)
                 && request.resource.data.diff(resource.data).affectedKeys()
